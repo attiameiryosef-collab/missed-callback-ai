@@ -6,6 +6,17 @@ Final school project — a focused demo, not a SaaS product.
 
 ---
 
+## Live deployment
+
+| Environment | Branch | Backend URL | Status |
+|---|---|---|---|
+| **production** | `main` | https://backend-production-b7e9.up.railway.app | ✅ live |
+| **staging** | `dev` | https://backend-staging-eb69.up.railway.app | ✅ live |
+
+Both backends respond to `GET /health` with `{"status":"ok"}`. Environment variables are currently set to `REPLACE_ME` placeholders — the apps boot but real Twilio / Vapi / Supabase calls will fail until real values are filled in.
+
+---
+
 ## What it does
 
 1. A customer dials the **business's Twilio number**.
@@ -43,7 +54,8 @@ flowchart LR
 | Telephony | Twilio Programmable Voice |
 | Voice AI | Vapi (STT + LLM + TTS) |
 | Database | Supabase (Postgres) |
-| Deployment | Railway (backend) |
+| Hosting | Railway (Docker, europe-west4) |
+| Frontend (planned) | Next.js 14 + Tailwind |
 
 ---
 
@@ -51,24 +63,39 @@ flowchart LR
 
 ```
 .
-├── backend/
+├── backend/                          # deployed to Railway
 │   ├── app/
-│   │   ├── main.py             # FastAPI app + /health
-│   │   ├── config.py           # Pydantic settings (env)
-│   │   ├── security.py         # Twilio signature verification
-│   │   ├── twilio_routes.py    # /twilio/voice  +  /twilio/dial-status
-│   │   ├── vapi_client.py      # Outbound: trigger Vapi callback
-│   │   ├── vapi_routes.py      # /vapi/end-of-call
-│   │   └── supabase_client.py  # insert_lead() via PostgREST
+│   │   ├── main.py                   # FastAPI app + /health
+│   │   ├── config.py                 # Pydantic settings (env)
+│   │   ├── security.py               # Twilio signature verification
+│   │   ├── twilio_routes.py          # /twilio/voice  +  /twilio/dial-status
+│   │   ├── vapi_client.py            # outbound: trigger Vapi callback
+│   │   ├── vapi_routes.py            # /vapi/end-of-call
+│   │   └── supabase_client.py        # insert_lead() via PostgREST
 │   ├── pyproject.toml
 │   ├── Dockerfile
 │   ├── railway.json
 │   └── .env.example
-└── supabase/
+├── frontend/                         # placeholder Next.js scaffold
+│   ├── app/
+│   ├── package.json
+│   └── ...
+└── supabase/                         # managed via Supabase CLI
     ├── config.toml
     └── migrations/
         └── 20260504123229_create_leads.sql
 ```
+
+---
+
+## Branch & environment strategy
+
+```
+main  → Railway production env  → backend-production-b7e9.up.railway.app
+dev   → Railway staging env     → backend-staging-eb69.up.railway.app
+```
+
+A push to `main` auto-deploys backend to production. A push to `dev` auto-deploys backend to staging. The `frontend` Railway service exists in both environments as a placeholder; it has no deploy yet.
 
 ---
 
@@ -100,6 +127,8 @@ create table leads (
 );
 ```
 
+Project on Supabase: `missed-callback-ai` (ref `gitmyhrstoxjxqawsfbr`).
+
 ---
 
 ## Setup
@@ -109,7 +138,7 @@ create table leads (
 ```bash
 # already done — keeping for reference
 supabase login
-supabase link --project-ref <your-project-ref>
+supabase link --project-ref gitmyhrstoxjxqawsfbr
 supabase db push
 ```
 
@@ -123,7 +152,7 @@ In the Vapi dashboard:
 2. Under **Phone Numbers → Import**, register the Twilio number (paste Twilio Account SID + Auth Token). Vapi returns a `phoneNumberId`.
 3. Under **Server URL** on the assistant:
    - URL: `<PUBLIC_BASE_URL>/vapi/end-of-call`
-   - Secret: any random value — also set as `VAPI_SERVER_SECRET` in `.env`.
+   - Secret: any random value — also set as `VAPI_SERVER_SECRET` in env.
 4. Under **Analysis → Structured Data**, configure:
    ```json
    {
@@ -142,9 +171,10 @@ In the Twilio console:
 
 1. Buy or use an existing phone number.
 2. Under **Voice & Fax → A CALL COMES IN**, set the webhook to:
-   - `https://<your-host>/twilio/voice` (POST)
+   - `https://backend-production-b7e9.up.railway.app/twilio/voice` (POST) — for production
+   - or the staging URL while testing
 
-### 4. Backend
+### 4. Local backend (optional, for development)
 
 ```bash
 cd backend
@@ -171,11 +201,45 @@ For local end-to-end testing, expose port 8000 with ngrok and use the ngrok URL 
 | `VAPI_ASSISTANT_ID` | Vapi dashboard → Assistant ID |
 | `VAPI_PHONE_NUMBER_ID` | Vapi dashboard → Phone Numbers ID |
 | `VAPI_SERVER_SECRET` | Random string, must match the assistant's Server URL Secret |
-| `SUPABASE_URL` | Supabase → Settings → API → Project URL |
+| `SUPABASE_URL` | `https://gitmyhrstoxjxqawsfbr.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → `service_role` (backend only) |
 | `PUBLIC_BASE_URL` | Public URL of this service (Railway URL or ngrok URL) |
 
 `.env` is gitignored — never commit it.
+
+To set a variable on Railway via CLI:
+
+```bash
+railway variables --service backend --environment staging --set "TWILIO_ACCOUNT_SID=AC..."
+```
+
+---
+
+## Railway infrastructure
+
+The Railway project is `missed-callback-ai`, organised as:
+
+```
+Project: missed-callback-ai
+├── Environment: production
+│   ├── backend   (root=backend, branch=main, Dockerfile build)
+│   └── frontend  (placeholder, no source)
+└── Environment: staging
+    ├── backend   (root=backend, branch=dev,  Dockerfile build)
+    └── frontend  (placeholder, no source)
+```
+
+Both backend services share a single project-level `backend` service, deployed from different branches per environment. Same for `frontend`.
+
+Health check `/health`, restart policy `ON_FAILURE` (max 5).
+
+### `railway.json` start-command gotcha
+
+Railway runs `startCommand` directly without a shell, so unquoted `$VAR` is not expanded. Wrap in `sh -c` if you rely on env-var interpolation in the command itself:
+
+```json
+"startCommand": "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+```
 
 ---
 
@@ -191,7 +255,7 @@ For local end-to-end testing, expose port 8000 with ngrok and use the ngrok URL 
 ### Quick webhook test (without burning Vapi minutes)
 
 ```bash
-curl -X POST http://localhost:8000/vapi/end-of-call \
+curl -X POST https://backend-staging-eb69.up.railway.app/vapi/end-of-call \
   -H "Content-Type: application/json" \
   -H "x-vapi-secret: $VAPI_SERVER_SECRET" \
   -d '{
@@ -210,20 +274,7 @@ curl -X POST http://localhost:8000/vapi/end-of-call \
   }'
 ```
 
-A new row should appear in `leads`.
-
----
-
-## Deployment (Railway)
-
-- **Root directory:** `backend/`
-- **Builder:** Dockerfile (already configured in `railway.json`)
-- **Healthcheck:** `/health`
-- Set every variable from the table above in Railway's environment settings.
-- After the first deploy, copy the Railway public URL into:
-  - `PUBLIC_BASE_URL` (Railway env)
-  - The Twilio number's voice webhook
-  - The Vapi assistant's Server URL
+A new row should appear in `leads` (once `SUPABASE_SERVICE_ROLE_KEY` is set to a real value).
 
 ---
 
@@ -234,6 +285,11 @@ A new row should appear in `leads`.
 - [x] Vapi outbound callback trigger
 - [x] Vapi end-of-call → Supabase insert
 - [x] Supabase migration applied to remote project
-- [ ] End-to-end live test
+- [x] Railway project + environments (production, staging)
+- [x] Backend deployed to both environments with public URLs
+- [x] `main` → production, `dev` → staging auto-deploy wired up
+- [ ] Real env vars filled in (currently `REPLACE_ME` placeholders)
+- [ ] Twilio webhook + Vapi server URL pointed at production backend
+- [ ] End-to-end live call test
 - [ ] Dashboard (Next.js) reading `leads`
-- [ ] Railway deploy
+- [ ] Frontend deployed
