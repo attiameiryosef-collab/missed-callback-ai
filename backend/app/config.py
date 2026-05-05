@@ -27,6 +27,12 @@ class Settings(BaseSettings):
 
     public_base_url: str = Field(...)
     dial_timeout_seconds: int = 15
+    # How long to wait after a missed call before triggering the AI callback.
+    callback_delay_seconds: int = 30
+    # Window used when counting how many times this number has called recently.
+    repeat_call_window_hours: int = 24
+    # Optional — surfaced to the Vapi assistant as {{business_name}}.
+    business_name: str = ""
     verify_twilio_signature: bool = True
     log_level: str = "INFO"
 

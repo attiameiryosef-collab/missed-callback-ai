@@ -16,8 +16,19 @@ class VapiCallbackError(Exception):
     pass
 
 
-async def trigger_callback(to_number: str, idempotency_key: str) -> dict | None:
+async def trigger_callback(
+    to_number: str,
+    idempotency_key: str,
+    *,
+    missed_call_count: int = 1,
+    business_name: str | None = None,
+    callback_reason: str = "missed_call",
+) -> dict | None:
     """Place an outbound call from the Twilio number (registered with Vapi) to `to_number`.
+
+    Extra context (missed_call_count, business_name, callback_reason) is forwarded
+    via assistantOverrides.variableValues so the assistant can reference them as
+    {{missed_call_count}}, {{business_name}}, {{callback_reason}} in its prompt.
 
     Returns the Vapi response dict on success, or None if this idempotency_key was already used.
     Raises VapiCallbackError on HTTP failure.
@@ -27,17 +38,28 @@ async def trigger_callback(to_number: str, idempotency_key: str) -> dict | None:
         return None
     _triggered_call_sids.add(idempotency_key)
 
+    variable_values = {
+        "caller_number": to_number,
+        "missed_call_count": missed_call_count,
+        "is_repeat_caller": missed_call_count > 1,
+        "business_name": business_name or "",
+        "callback_reason": callback_reason,
+    }
     payload = {
         "assistantId": settings.vapi_assistant_id,
         "phoneNumberId": settings.vapi_phone_number_id,
         "customer": {"number": to_number},
+        "assistantOverrides": {"variableValues": variable_values},
     }
     headers = {
         "Authorization": f"Bearer {settings.vapi_api_key}",
         "Content-Type": "application/json",
     }
 
-    logger.info("vapi callback dispatch: to=%s key=%s", to_number, idempotency_key)
+    logger.info(
+        "vapi callback dispatch: to=%s key=%s count=%s reason=%s",
+        to_number, idempotency_key, missed_call_count, callback_reason,
+    )
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(f"{VAPI_BASE_URL}/call", json=payload, headers=headers)
