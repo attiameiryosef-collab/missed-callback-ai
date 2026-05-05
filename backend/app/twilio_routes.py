@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from twilio.twiml.voice_response import VoiceResponse
 
 from app.config import settings
@@ -52,13 +54,15 @@ async def _delayed_callback(
     to_number: str,
     idempotency_key: str,
     missed_call_count: int,
+    delay_seconds: int,
 ) -> None:
-    """Sleep CALLBACK_DELAY_SECONDS, then place the Vapi callback.
+    """Sleep `delay_seconds`, then place the Vapi callback.
 
     Runs as a fire-and-forget task so the Twilio webhook can return immediately.
     """
     try:
-        await asyncio.sleep(settings.callback_delay_seconds)
+        if delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
         await trigger_callback(
             to_number=to_number,
             idempotency_key=idempotency_key,
@@ -70,6 +74,42 @@ async def _delayed_callback(
         logger.error("vapi callback failed for key=%s: %s", idempotency_key, e)
     except Exception:
         logger.exception("delayed callback crashed for key=%s", idempotency_key)
+
+
+async def _handle_missed_call(
+    *,
+    phone: str,
+    idempotency_key: str,
+    delay_seconds: int,
+) -> int:
+    """Shared missed-call flow: count recent misses, log a 'missed' lead row,
+    schedule the delayed Vapi callback. Returns the missed_call_count used.
+    """
+    missed_call_count = 1
+    try:
+        prior = await count_recent_missed_calls(
+            phone=phone,
+            hours=settings.repeat_call_window_hours,
+        )
+        missed_call_count = prior + 1
+        await insert_lead(
+            phone=phone,
+            status="missed",
+            missed_call_count=missed_call_count,
+        )
+    except SupabaseError as e:
+        # Don't block the callback on a logging failure — proceed with count=1.
+        logger.error("supabase missed-call tracking failed: %s", e)
+
+    asyncio.create_task(
+        _delayed_callback(
+            to_number=phone,
+            idempotency_key=idempotency_key,
+            missed_call_count=missed_call_count,
+            delay_seconds=delay_seconds,
+        )
+    )
+    return missed_call_count
 
 
 @router.post("/dial-status", dependencies=[Depends(validate_twilio_signature)])
@@ -93,30 +133,51 @@ async def dial_status(request: Request) -> Response:
     )
 
     if dial_status in MISSED_STATUSES and original_caller and parent_call_sid:
-        missed_call_count = 1
-        try:
-            prior = await count_recent_missed_calls(
-                phone=original_caller,
-                hours=settings.repeat_call_window_hours,
-            )
-            missed_call_count = prior + 1
-            await insert_lead(
-                phone=original_caller,
-                status="missed",
-                missed_call_count=missed_call_count,
-            )
-        except SupabaseError as e:
-            # Don't block the callback on a logging failure — proceed with count=1.
-            logger.error("supabase missed-call tracking failed: %s", e)
-
-        asyncio.create_task(
-            _delayed_callback(
-                to_number=original_caller,
-                idempotency_key=parent_call_sid,
-                missed_call_count=missed_call_count,
-            )
+        await _handle_missed_call(
+            phone=original_caller,
+            idempotency_key=parent_call_sid,
+            delay_seconds=settings.callback_delay_seconds,
         )
 
     twiml = VoiceResponse()
     twiml.hangup()
     return _twiml_response(twiml)
+
+
+class SimulateMissedCallBody(BaseModel):
+    phone: str = Field(..., min_length=4, description="E.164 phone, e.g. +972501234567")
+    delay_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        le=600,
+        description="Override the configured callback delay. Default 0 for instant testing.",
+    )
+
+
+@router.post("/simulate-missed-call")
+async def simulate_missed_call(body: SimulateMissedCallBody) -> dict:
+    """Test-only endpoint: runs the exact missed-call flow on demand.
+
+    Useful for demos and local testing without calling the Twilio number. Skips
+    Twilio signature validation. Counts repeats, writes a 'missed' row, and
+    fires the Vapi callback after `delay_seconds` (default 0).
+    """
+    phone = body.phone.strip()
+    delay = body.delay_seconds if body.delay_seconds is not None else 0
+    idempotency_key = f"sim-{uuid.uuid4()}"
+
+    logger.info("simulate-missed-call: phone=%s delay=%ss key=%s", phone, delay, idempotency_key)
+
+    missed_call_count = await _handle_missed_call(
+        phone=phone,
+        idempotency_key=idempotency_key,
+        delay_seconds=delay,
+    )
+
+    return {
+        "ok": True,
+        "phone": phone,
+        "missed_call_count": missed_call_count,
+        "delay_seconds": delay,
+        "idempotency_key": idempotency_key,
+    }
