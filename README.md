@@ -13,7 +13,7 @@ Final school project — a focused demo, not a SaaS product.
 | **production** | `main` | https://backend-production-b7e9.up.railway.app | ✅ live |
 | **staging** | `dev` | https://backend-staging-eb69.up.railway.app | ✅ live |
 
-Both backends respond to `GET /health` with `{"status":"ok"}`. Environment variables are currently set to `REPLACE_ME` placeholders — the apps boot but real Twilio / Vapi / Supabase calls will fail until real values are filled in.
+Both backends respond to `GET /health` with `{"status":"ok"}`. Production env vars are filled in (real Twilio number, Vapi assistant, Supabase project); staging still has placeholders.
 
 ---
 
@@ -150,20 +150,44 @@ In the Vapi dashboard:
 
 1. Create an **assistant** with a system prompt for the demo (greeting, basic Q&A, offer to book).
 2. Under **Phone Numbers → Import**, register the Twilio number (paste Twilio Account SID + Auth Token). Vapi returns a `phoneNumberId`.
-3. Under **Server URL** on the assistant:
-   - URL: `<PUBLIC_BASE_URL>/vapi/end-of-call`
-   - Secret: any random value — also set as `VAPI_SERVER_SECRET` in env.
-4. Under **Analysis → Structured Data**, configure:
-   ```json
-   {
-     "type": "object",
-     "properties": {
-       "name":                  { "type": "string",  "description": "Customer's name if mentioned" },
-       "appointment_requested": { "type": "boolean", "description": "Did the customer ask to book?" },
-       "preferred_time":        { "type": "string",  "description": "Free-text preferred time" }
-     }
-   }
+3. On the **assistant** (not the phone number — one place is enough), set:
+   - **Server URL** → `<PUBLIC_BASE_URL>/vapi/end-of-call`
+   - **Server Messages** → make sure `end-of-call-report` is checked. Without this, no webhook is ever sent.
+   - **Server URL Secret** (optional) → if set, also export `VAPI_SERVER_SECRET` with the same value; otherwise leave both empty and the backend skips the header check.
+4. Under **Analysis**, enable both `summaryPlan` and `structuredDataPlan`. The new dashboard UI ("Structured Outputs & Scorecard") sometimes saves the fields without actually flipping the plans on — verify via the API (see below). One-shot PATCH that does both:
+
+   ```bash
+   curl -X PATCH "https://api.vapi.ai/assistant/$VAPI_ASSISTANT_ID" \
+     -H "Authorization: Bearer $VAPI_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "analysisPlan": {
+         "summaryPlan": { "enabled": true },
+         "structuredDataPlan": {
+           "enabled": true,
+           "schema": {
+             "type": "object",
+             "properties": {
+               "name":                  { "type": "string",  "description": "Caller first name if mentioned." },
+               "appointment_requested": { "type": "boolean", "description": "True if the caller asked to book." },
+               "preferred_time":        { "type": "string",  "description": "Caller preferred time, free text." },
+               "call_summary":          { "type": "string",  "description": "One-sentence summary of the call." }
+             }
+           }
+         }
+       }
+     }'
    ```
+
+   Verify it stuck:
+
+   ```bash
+   curl -s -H "Authorization: Bearer $VAPI_API_KEY" \
+     "https://api.vapi.ai/assistant/$VAPI_ASSISTANT_ID" \
+     | jq '{server, analysisPlan}'
+   ```
+
+   Both `summaryPlan.enabled` and `structuredDataPlan.enabled` must be `true`. If they aren't, the backend will keep receiving `end-of-call-report` events with empty `analysis` and only `phone` will be saved.
 
 ### 3. Twilio
 
@@ -278,18 +302,34 @@ A new row should appear in `leads` (once `SUPABASE_SERVICE_ROLE_KEY` is set to a
 
 ---
 
+## Troubleshooting: end-of-call rows only have `phone`
+
+If a `leads` row gets inserted after a call but `call_summary`, `name`, `appointment_requested`, `preferred_time` are all NULL, work through these checks in order:
+
+1. **Is `/vapi/end-of-call` being hit at all?** `railway logs -e production` and look for `app.vapi_routes` lines. If you only see `app.twilio_routes` and `app.vapi_client` (outbound), Vapi is not posting back → the assistant has no Server URL or no `serverMessages` subscribed.
+2. **Is the event type `end-of-call-report`?** Other types (`speech-update`, `conversation-update`, `status-update`) are received during the call and are ignored by the handler. Only `end-of-call-report` writes a row.
+3. **Does Vapi's call object have an analysis?**
+   ```bash
+   curl -s -H "Authorization: Bearer $VAPI_API_KEY" "https://api.vapi.ai/call/<call_id>" \
+     | jq '{status, endedReason, hasAnalysis: (.analysis != null), summary: .analysis.summary, structuredData: .analysis.structuredData}'
+   ```
+   If `hasAnalysis: false`, the assistant's `analysisPlan` is disabled — re-run the PATCH in section 2.4 above.
+4. **Backend defensive parsing.** `vapi_routes.py` accepts several common naming variants for structured-data keys (`name` / `customerName`, `appointment_requested` / `appointmentRequested`, `preferred_time` / `preferredTime`), and synthesizes a short fallback `call_summary` if Vapi didn't return one — so the column is never NULL after the webhook fires successfully.
+
+---
+
 ## Status
 
 - [x] Backend skeleton (FastAPI, Twilio + Vapi + Supabase wiring)
 - [x] Twilio missed-call detection
 - [x] Vapi outbound callback trigger
-- [x] Vapi end-of-call → Supabase insert
+- [x] Vapi end-of-call → Supabase insert (with defensive parsing + fallback summary)
 - [x] Supabase migration applied to remote project
 - [x] Railway project + environments (production, staging)
 - [x] Backend deployed to both environments with public URLs
 - [x] `main` → production, `dev` → staging auto-deploy wired up
-- [ ] Real env vars filled in (currently `REPLACE_ME` placeholders)
-- [ ] Twilio webhook + Vapi server URL pointed at production backend
-- [ ] End-to-end live call test
+- [x] Real env vars filled in (production)
+- [x] Twilio webhook + Vapi server URL pointed at production backend
+- [x] End-to-end live call test (Server URL, Server Messages, analysisPlan all verified via API)
 - [ ] Dashboard (Next.js) reading `leads`
 - [ ] Frontend deployed
