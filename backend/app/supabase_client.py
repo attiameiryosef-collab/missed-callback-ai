@@ -66,6 +66,53 @@ async def insert_lead(
     return rows[0]
 
 
+async def insert_call(
+    *,
+    phone: str,
+    call_summary: str | None = None,
+    transcript: str | None = None,
+    recording_url: str | None = None,
+    duration_seconds: int | None = None,
+    ended_reason: str | None = None,
+    appointment_requested: bool = False,
+    preferred_time: str | None = None,
+    status: str = "completed",
+) -> dict[str, Any]:
+    """Insert one row into public.calls via the PostgREST endpoint.
+
+    One row per recovered callback conversation. The dashboard reads from here.
+    """
+    payload = {
+        "phone": phone,
+        "call_summary": call_summary,
+        "transcript": transcript,
+        "recording_url": recording_url,
+        "duration_seconds": duration_seconds,
+        "ended_reason": ended_reason,
+        "appointment_requested": appointment_requested,
+        "preferred_time": preferred_time,
+        "status": status,
+    }
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/calls"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload, headers=_headers())
+    except httpx.HTTPError as e:
+        logger.exception("supabase network error: %s", e)
+        raise SupabaseError(f"network error contacting Supabase: {e}") from e
+
+    if resp.status_code >= 400:
+        logger.error("supabase insert calls failed: status=%s body=%s", resp.status_code, resp.text)
+        raise SupabaseError(f"supabase {resp.status_code}: {resp.text}")
+
+    rows = resp.json()
+    if not isinstance(rows, list) or not rows:
+        logger.error("supabase insert calls returned no rows: %s", resp.text)
+        raise SupabaseError(f"supabase returned no rows: {resp.text}")
+    return rows[0]
+
+
 async def count_recent_missed_calls(phone: str, hours: int) -> int:
     """Count how many missed-call rows exist for `phone` in the last `hours` hours."""
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()

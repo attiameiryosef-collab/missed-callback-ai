@@ -25,8 +25,8 @@ Both backends respond to `GET /health` with `{"status":"ok"}`. Production env va
 4. The backend asks **Vapi** to place an outbound call **from the same Twilio number** back to the customer.
 5. A **Vapi voice agent** (STT → LLM → TTS) talks to the customer: answers basic business questions and offers to book an appointment.
 6. When the call ends, **Vapi posts an end-of-call report** to the backend.
-7. The backend extracts the summary + structured data and **inserts a row into Supabase** (`leads` table).
-8. (Future) A dashboard reads the table so the owner sees every recovered call.
+7. The backend **always inserts a row into `calls`** (every recovered conversation), and **additionally inserts a row into `leads`** only when the conversation produced an opportunity (caller asked for an appointment or gave a name).
+8. (Future) A dashboard reads `calls` so the owner sees every recovered call, with `leads` highlighted as the subset worth following up.
 
 ---
 
@@ -41,7 +41,8 @@ flowchart LR
     D -->|4. POST /call| E[Vapi]
     E -->|5. callback from Twilio number| A
     E -->|6. end-of-call webhook| D
-    D -->|7. insert lead| F[(Supabase leads)]
+    D -->|7a. insert every conversation| F[(Supabase calls)]
+    D -->|7b. insert if opportunity| G[(Supabase leads)]
 ```
 
 ---
@@ -83,7 +84,9 @@ flowchart LR
 └── supabase/                         # managed via Supabase CLI
     ├── config.toml
     └── migrations/
-        └── 20260504123229_create_leads.sql
+        ├── 20260504123229_create_leads.sql
+        ├── 20260505000000_add_missed_call_count.sql
+        └── 20260514000000_create_calls.sql
 ```
 
 ---
@@ -106,15 +109,32 @@ A push to `main` auto-deploys backend to production. A push to `dev` auto-deploy
 | GET  | `/health` | Liveness probe (Railway) |
 | POST | `/twilio/voice` | Inbound voice webhook → returns TwiML `<Dial>` to forward to owner |
 | POST | `/twilio/dial-status` | `<Dial>` action callback → triggers Vapi callback if call was missed |
-| POST | `/vapi/end-of-call` | Vapi end-of-call report → inserts row into `leads` |
+| POST | `/vapi/end-of-call` | Vapi end-of-call report → inserts row into `calls` (always) and into `leads` (if appointment requested or caller named) |
 
 ---
 
 ## Database schema
 
-Single table, no auth, no RLS — demo only.
+Two tables, no auth, no RLS — demo only.
+
+- **`calls`** = **every** recovered callback conversation. One row per Vapi end-of-call report. The dashboard reads from here.
+- **`leads`** = the subset of conversations that look like a potential customer / appointment opportunity. Written **only** when the caller asked for an appointment **or** gave their name. Also used by `/twilio/dial-status` to log `status='missed'` rows for repeat-caller tracking.
 
 ```sql
+create table calls (
+  id                    uuid primary key default gen_random_uuid(),
+  phone                 text not null,
+  call_summary          text,
+  transcript            text,
+  recording_url         text,
+  duration_seconds      int,
+  ended_reason          text,
+  appointment_requested boolean not null default false,
+  preferred_time        text,
+  status                text not null default 'completed',
+  created_at            timestamptz not null default now()
+);
+
 create table leads (
   id                    uuid primary key default gen_random_uuid(),
   phone                 text not null,
@@ -123,9 +143,12 @@ create table leads (
   appointment_requested boolean not null default false,
   preferred_time        text,
   status                text not null default 'new',
+  missed_call_count     integer not null default 0,
   created_at            timestamptz not null default now()
 );
 ```
+
+There is no FK between the two — `calls` is a flat log, `leads` is a flat opportunity table. The dashboard can join on `phone` if it ever needs to link a lead back to its conversation. Kept deliberately simple for the MVP.
 
 Project on Supabase: `missed-callback-ai` (ref `gitmyhrstoxjxqawsfbr`).
 
@@ -274,7 +297,9 @@ Railway runs `startCommand` directly without a shell, so unquoted `$VAR` is not 
 3. Call the Twilio number from a third phone, **don't pick up** your private phone for 15s.
 4. The third phone gets called back from the Twilio number — the Vapi agent answers.
 5. Have a short conversation, hang up.
-6. Open the Supabase **Table Editor → `leads`** — a new row appears with the summary + extracted fields.
+6. Open the Supabase **Table Editor**:
+   - **`calls`** — a new row appears for **every** conversation, with summary, transcript, recording_url, duration_seconds, ended_reason.
+   - **`leads`** — a row appears **only** if you asked for an appointment or gave your name during the call.
 
 ### Quick webhook test (without burning Vapi minutes)
 
@@ -298,13 +323,13 @@ curl -X POST https://backend-staging-eb69.up.railway.app/vapi/end-of-call \
   }'
 ```
 
-A new row should appear in `leads` (once `SUPABASE_SERVICE_ROLE_KEY` is set to a real value).
+A new row should appear in `calls`, and — because the payload above has `appointment_requested: true` and a `name` — a matching row also in `leads`. Drop those fields from the payload to verify the "calls-only" path: only `calls` should grow.
 
 ---
 
 ## Troubleshooting: end-of-call rows only have `phone`
 
-If a `leads` row gets inserted after a call but `call_summary`, `name`, `appointment_requested`, `preferred_time` are all NULL, work through these checks in order:
+After a call, a row should always appear in `calls`. A row in `leads` only appears if the caller asked for an appointment or gave a name — if you expected a `leads` row and don't see one, that's the most likely reason. If a `calls` row is inserted but `call_summary`, `transcript`, `recording_url`, `appointment_requested`, `preferred_time` etc. are all NULL, work through these checks in order:
 
 1. **Is `/vapi/end-of-call` being hit at all?** `railway logs -e production` and look for `app.vapi_routes` lines. If you only see `app.twilio_routes` and `app.vapi_client` (outbound), Vapi is not posting back → the assistant has no Server URL or no `serverMessages` subscribed.
 2. **Is the event type `end-of-call-report`?** Other types (`speech-update`, `conversation-update`, `status-update`) are received during the call and are ignored by the handler. Only `end-of-call-report` writes a row.
@@ -324,6 +349,7 @@ If a `leads` row gets inserted after a call but `call_summary`, `name`, `appoint
 - [x] Twilio missed-call detection
 - [x] Vapi outbound callback trigger
 - [x] Vapi end-of-call → Supabase insert (with defensive parsing + fallback summary)
+- [x] Split storage: `calls` (every conversation) + `leads` (opportunities only)
 - [x] Supabase migration applied to remote project
 - [x] Railway project + environments (production, staging)
 - [x] Backend deployed to both environments with public URLs
@@ -331,5 +357,5 @@ If a `leads` row gets inserted after a call but `call_summary`, `name`, `appoint
 - [x] Real env vars filled in (production)
 - [x] Twilio webhook + Vapi server URL pointed at production backend
 - [x] End-to-end live call test (Server URL, Server Messages, analysisPlan all verified via API)
-- [ ] Dashboard (Next.js) reading `leads`
+- [ ] Dashboard (Next.js) reading `calls` (with `leads` highlighted)
 - [ ] Frontend deployed
