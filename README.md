@@ -56,7 +56,7 @@ flowchart LR
 | Voice AI | Vapi (STT + LLM + TTS) |
 | Database | Supabase (Postgres) |
 | Hosting | Railway (Docker, europe-west4) |
-| Frontend (planned) | Next.js 14 + Tailwind |
+| Frontend | Next.js 14 (App Router) + Tailwind + Supabase JS |
 
 ---
 
@@ -77,10 +77,21 @@ flowchart LR
 │   ├── Dockerfile
 │   ├── railway.json
 │   └── .env.example
-├── frontend/                         # placeholder Next.js scaffold
+├── frontend/                         # Next.js 14 dashboard, deployed to Railway
 │   ├── app/
+│   │   ├── layout.tsx                # sidebar shell
+│   │   ├── page.tsx                  # Overview (stat cards + recent calls)
+│   │   ├── calls/page.tsx            # Calls table (click row → details modal)
+│   │   ├── leads/page.tsx            # Leads table
+│   │   ├── loading.tsx               # skeleton
+│   │   └── error.tsx                 # error boundary
+│   ├── components/                   # StatCard, CallsTable, CallDetailsModal,
+│   │                                 # LeadsTable, AudioPlayer, EmptyState,
+│   │                                 # StatusBadge, Sidebar, PageHeader, …
+│   ├── lib/                          # supabase client, types, queries, format
 │   ├── package.json
-│   └── ...
+│   ├── railway.json
+│   └── .env.example
 └── supabase/                         # managed via Supabase CLI
     ├── config.toml
     └── migrations/
@@ -98,7 +109,7 @@ main  → Railway production env  → backend-production-b7e9.up.railway.app
 dev   → Railway staging env     → backend-staging-eb69.up.railway.app
 ```
 
-A push to `main` auto-deploys backend to production. A push to `dev` auto-deploys backend to staging. The `frontend` Railway service exists in both environments as a placeholder; it has no deploy yet.
+A push to `main` auto-deploys **both** the backend and the frontend to production. A push to `dev` does the same for staging.
 
 ---
 
@@ -269,11 +280,11 @@ The Railway project is `missed-callback-ai`, organised as:
 ```
 Project: missed-callback-ai
 ├── Environment: production
-│   ├── backend   (root=backend, branch=main, Dockerfile build)
-│   └── frontend  (placeholder, no source)
+│   ├── backend   (root=backend,  branch=main, Dockerfile build)
+│   └── frontend  (root=frontend, branch=main, Nixpacks build)
 └── Environment: staging
-    ├── backend   (root=backend, branch=dev,  Dockerfile build)
-    └── frontend  (placeholder, no source)
+    ├── backend   (root=backend,  branch=dev,  Dockerfile build)
+    └── frontend  (root=frontend, branch=dev,  Nixpacks build)
 ```
 
 Both backend services share a single project-level `backend` service, deployed from different branches per environment. Same for `frontend`.
@@ -357,5 +368,53 @@ After a call, a row should always appear in `calls`. A row in `leads` only appea
 - [x] Real env vars filled in (production)
 - [x] Twilio webhook + Vapi server URL pointed at production backend
 - [x] End-to-end live call test (Server URL, Server Messages, analysisPlan all verified via API)
-- [ ] Dashboard (Next.js) reading `calls` (with `leads` highlighted)
-- [ ] Frontend deployed
+- [x] Dashboard (Next.js) reading `calls` and `leads` from Supabase
+- [ ] Frontend deployed (Railway settings in `frontend/railway.json` — confirm root dir + env vars in the Railway UI for each environment)
+
+---
+
+## Frontend dashboard
+
+The dashboard lives in `frontend/` and is a Next.js 14 App Router app. It reads `calls` and `leads` directly from Supabase using the **anon** key (no auth, demo only).
+
+### Pages
+
+| Path | Shows |
+|---|---|
+| `/` | Overview — 4 stat cards (recovered calls, leads, appointments requested, avg duration) + most recent 10 calls |
+| `/calls` | Every callback conversation. Click a row → modal with summary, transcript, recording player, duration, ended reason, preferred time |
+| `/leads` | Subset of calls flagged as opportunities (caller named or asked to book) |
+
+If `transcript` or `recording_url` is null the UI shows "Not available yet" instead of breaking. If Supabase env vars are missing, the page shows a friendly banner rather than crashing.
+
+### Local development
+
+```bash
+cd frontend
+cp .env.example .env.local
+# fill in NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY
+npm install
+npm run dev      # http://localhost:3000
+```
+
+### Frontend env vars
+
+| Name | Source | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Settings → API → Project URL | Safe in browser |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Settings → API → `anon public` | Safe in browser. **Never** put `service_role` here |
+| `NEXT_PUBLIC_APP_ENV` | `production` or `staging` | Optional, shown in the sidebar |
+
+### Deploying the frontend on Railway
+
+The Railway service config lives in `frontend/railway.json` (Nixpacks build, `npm install && npm run build`, start with `npm run start`). For each environment:
+
+1. **Root directory** must be `frontend` (Service → Settings → Source → Root Directory).
+2. **Branch** must be `main` for production and `dev` for staging (Service → Settings → Source → Branch).
+3. **Environment variables** — set on the frontend service in both environments:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_APP_ENV` (optional, `production` or `staging`)
+4. Railway automatically provides `PORT`; the frontend reads it via `next start -p ${PORT:-3000}`.
+
+The backend service config in `backend/railway.json` is **untouched** — backend continues to deploy from `backend/` with the Dockerfile.
