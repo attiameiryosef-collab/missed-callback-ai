@@ -14,8 +14,8 @@ export function Sidebar() {
   const envLabel = process.env.NEXT_PUBLIC_APP_ENV ?? "demo";
 
   return (
-    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
-      <div className="px-5 py-6 border-b border-slate-200">
+    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-stone-200 bg-stone-100/70 backdrop-blur-sm">
+      <div className="px-5 py-6 border-b border-stone-200">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 grid place-items-center text-white text-sm font-bold">
             M
@@ -39,10 +39,10 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors " +
+                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ease-out " +
                 (active
-                  ? "bg-indigo-50 text-indigo-700"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900")
+                  ? "bg-white text-indigo-700 shadow-card ring-1 ring-stone-200"
+                  : "text-slate-600 hover:bg-white/70 hover:text-slate-900")
               }
             >
               <NavIcon name={item.icon} active={active} />
@@ -51,7 +51,7 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="px-5 py-4 border-t border-slate-200 text-xs text-slate-500">
+      <div className="px-5 py-4 border-t border-stone-200 text-xs text-slate-500">
         Final project demo
       </div>
     </aside>

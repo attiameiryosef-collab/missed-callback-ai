@@ -11,12 +11,14 @@ import {
 import { StatusBadge } from "./StatusBadge";
 import { EmptyState } from "./EmptyState";
 import { CallDetailsModal } from "./CallDetailsModal";
+import { Avatar } from "./Avatar";
 
 interface CallsTableProps {
   calls: Call[];
+  namesByPhone?: Record<string, string>;
 }
 
-export function CallsTable({ calls }: CallsTableProps) {
+export function CallsTable({ calls, namesByPhone = {} }: CallsTableProps) {
   const [selected, setSelected] = useState<Call | null>(null);
 
   if (calls.length === 0) {
@@ -31,7 +33,7 @@ export function CallsTable({ calls }: CallsTableProps) {
   return (
     <>
       <div className="bg-white rounded-xl border border-slate-200 shadow-card overflow-hidden">
-        <div className="hidden md:grid grid-cols-12 px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide border-b border-slate-200 bg-slate-50">
+        <div className="hidden md:grid grid-cols-12 px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide border-b border-slate-200 bg-slate-50/80">
           <div className="col-span-3">Caller</div>
           <div className="col-span-4">Summary</div>
           <div className="col-span-1">Duration</div>
@@ -42,18 +44,21 @@ export function CallsTable({ calls }: CallsTableProps) {
           {calls.map((call) => (
             <li
               key={call.id}
-              className="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-5 py-4 hover:bg-slate-50/60 transition-colors"
+              onClick={() => setSelected(call)}
+              className="group grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-5 py-4 cursor-pointer hover:bg-indigo-50/30 transition-colors"
             >
               <div className="md:col-span-3 flex items-center gap-3">
-                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 text-white text-xs font-semibold grid place-items-center shrink-0">
-                  {phoneInitials(call.phone)}
-                </div>
+                <Avatar name={namesByPhone[call.phone]} phone={call.phone} />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-900 truncate">
-                    {formatPhone(call.phone)}
+                    {namesByPhone[call.phone] || formatPhone(call.phone)}
                   </div>
-                  <div className="text-xs text-slate-500 md:hidden">
-                    {formatRelative(call.created_at)}
+                  <div className="text-xs text-slate-500 truncate">
+                    {namesByPhone[call.phone] ? formatPhone(call.phone) : null}
+                    <span className="md:hidden">
+                      {namesByPhone[call.phone] ? " · " : ""}
+                      {formatRelative(call.created_at)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -84,12 +89,12 @@ export function CallsTable({ calls }: CallsTableProps) {
                 >
                   {formatRelative(call.created_at)}
                 </span>
-                <button
-                  onClick={() => setSelected(call)}
-                  className="md:mt-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                <span
+                  className="md:mt-1 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 group-hover:text-indigo-700 group-hover:translate-x-0.5 transition-transform"
                 >
-                  View details →
-                </button>
+                  View details
+                  <span aria-hidden>→</span>
+                </span>
               </div>
             </li>
           ))}
@@ -98,10 +103,4 @@ export function CallsTable({ calls }: CallsTableProps) {
       <CallDetailsModal call={selected} onClose={() => setSelected(null)} />
     </>
   );
-}
-
-function phoneInitials(phone: string): string {
-  const digits = (phone || "").replace(/\D/g, "");
-  if (digits.length >= 2) return digits.slice(-2);
-  return phone.slice(0, 2).toUpperCase();
 }

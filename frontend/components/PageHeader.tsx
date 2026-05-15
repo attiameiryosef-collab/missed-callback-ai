@@ -6,7 +6,7 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, badge }: PageHeaderProps) {
   return (
-    <header className="px-6 md:px-10 pt-8 pb-6 border-b border-slate-200 bg-white">
+    <header className="px-6 md:px-10 pt-8 pb-6 border-b border-stone-200 bg-white">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">

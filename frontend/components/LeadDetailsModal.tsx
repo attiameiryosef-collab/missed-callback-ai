@@ -1,6 +1,6 @@
 "use client";
 
-import type { Call } from "@/lib/types";
+import type { Call, Lead } from "@/lib/types";
 import { formatDate, formatDuration, formatPhone } from "@/lib/format";
 import { AudioPlayer } from "./AudioPlayer";
 import { StatusBadge } from "./StatusBadge";
@@ -8,55 +8,61 @@ import { Avatar } from "./Avatar";
 import { ModalShell, ModalSkeleton } from "./ModalShell";
 import { TranscriptView } from "./TranscriptView";
 
-interface CallDetailsModalProps {
-  call: Call | null;
+interface LeadDetailsModalProps {
+  lead: Lead | null;
+  call?: Call | null;
   onClose: () => void;
 }
 
-export function CallDetailsModal({ call, onClose }: CallDetailsModalProps) {
+export function LeadDetailsModal({ lead, call, onClose }: LeadDetailsModalProps) {
   return (
     <ModalShell
-      open={Boolean(call)}
+      open={Boolean(lead)}
       onClose={onClose}
-      itemKey={call?.id}
+      itemKey={lead?.id}
       skeleton={<ModalSkeleton />}
       header={
-        call ? (
+        lead ? (
           <div className="flex items-center gap-3 min-w-0">
-            <Avatar phone={call.phone} size="lg" />
+            <Avatar name={lead.name} phone={lead.phone} size="lg" />
             <div className="min-w-0">
               <div className="text-xs uppercase tracking-wide text-slate-500">
-                Call from
+                Lead
               </div>
               <div className="text-lg font-semibold text-slate-900 truncate">
-                {formatPhone(call.phone)}
+                {lead.name || "Unknown caller"}
               </div>
-              <div className="mt-0.5 text-xs text-slate-500">
-                {formatDate(call.created_at)}
+              <div className="mt-0.5 text-xs text-slate-500 truncate">
+                {formatPhone(lead.phone)} · {formatDate(lead.created_at)}
               </div>
             </div>
           </div>
         ) : null
       }
     >
-      {call ? <CallBody call={call} /> : null}
+      {lead ? <LeadBody lead={lead} call={call ?? null} /> : null}
     </ModalShell>
   );
 }
 
-function CallBody({ call }: { call: Call }) {
+function LeadBody({ lead, call }: { lead: Lead; call: Call | null }) {
+  const summary = lead.call_summary || call?.call_summary || null;
+  const preferredTime = lead.preferred_time || call?.preferred_time || null;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
-        {call.appointment_requested ? (
+        {lead.appointment_requested ? (
           <StatusBadge kind="appointment" />
         ) : (
-          <StatusBadge
-            kind={call.status === "missed" ? "missed" : "completed"}
-            label={call.status}
-          />
+          <StatusBadge kind="new" label={lead.status} />
         )}
-        {call.ended_reason ? (
+        {lead.missed_call_count > 1 ? (
+          <span className="text-xs text-amber-700 bg-amber-50 ring-1 ring-inset ring-amber-200 px-2 py-0.5 rounded-full">
+            {lead.missed_call_count} missed attempts
+          </span>
+        ) : null}
+        {call?.ended_reason ? (
           <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
             ended: {call.ended_reason}
           </span>
@@ -65,23 +71,24 @@ function CallBody({ call }: { call: Call }) {
 
       <Section label="Summary">
         <p className="text-sm text-slate-700 leading-relaxed">
-          {call.call_summary || (
-            <span className="text-slate-400">Not available yet</span>
-          )}
+          {summary || <span className="text-slate-400">Not available yet</span>}
         </p>
       </Section>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Duration" value={formatDuration(call.duration_seconds)} />
-        <Field label="Preferred time" value={call.preferred_time || "—"} />
+        <Field
+          label="Duration"
+          value={formatDuration(call?.duration_seconds)}
+        />
+        <Field label="Preferred time" value={preferredTime || "—"} />
       </div>
 
       <Section label="Recording">
-        <AudioPlayer src={call.recording_url} />
+        <AudioPlayer src={call?.recording_url ?? null} />
       </Section>
 
       <Section label="Transcript">
-        <TranscriptView transcript={call.transcript} />
+        <TranscriptView transcript={call?.transcript ?? null} />
       </Section>
     </div>
   );

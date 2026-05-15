@@ -63,7 +63,7 @@ function ActionLink({
   return (
     <Link
       href={href}
-      className="bg-white rounded-xl border border-slate-200 shadow-card p-4 flex items-center gap-3 hover:border-indigo-300 hover:shadow-md transition-all group"
+      className="bg-white rounded-xl border border-slate-200 shadow-card p-4 flex items-center gap-3 hover:border-indigo-200 hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 ease-out group"
     >
       <div className={"h-9 w-9 rounded-lg grid place-items-center " + ACCENTS[accent]}>
         {icon}

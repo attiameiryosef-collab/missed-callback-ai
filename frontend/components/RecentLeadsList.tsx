@@ -3,6 +3,7 @@ import type { Lead } from "@/lib/types";
 import { formatPhone, formatRelative } from "@/lib/format";
 import { StatusBadge } from "./StatusBadge";
 import { EmptyState } from "./EmptyState";
+import { Avatar } from "./Avatar";
 
 interface RecentLeadsListProps {
   leads: Lead[];
@@ -25,9 +26,7 @@ export function RecentLeadsList({ leads }: RecentLeadsListProps) {
             key={lead.id}
             className="px-5 py-3 hover:bg-slate-50/60 transition-colors flex items-center gap-3"
           >
-            <div className="h-9 w-9 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 text-white text-xs font-semibold grid place-items-center shrink-0">
-              {(lead.name?.slice(0, 2) || "??").toUpperCase()}
-            </div>
+            <Avatar name={lead.name} phone={lead.phone} />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-slate-900 truncate">
                 {lead.name || "Unknown caller"}
