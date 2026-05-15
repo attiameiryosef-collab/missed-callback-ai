@@ -11,9 +11,14 @@ import { TranscriptView } from "./TranscriptView";
 interface CallDetailsModalProps {
   call: Call | null;
   onClose: () => void;
+  customerName?: string | null;
 }
 
-export function CallDetailsModal({ call, onClose }: CallDetailsModalProps) {
+export function CallDetailsModal({
+  call,
+  onClose,
+  customerName,
+}: CallDetailsModalProps) {
   return (
     <ModalShell
       open={Boolean(call)}
@@ -23,15 +28,16 @@ export function CallDetailsModal({ call, onClose }: CallDetailsModalProps) {
       header={
         call ? (
           <div className="flex items-center gap-3 min-w-0">
-            <Avatar phone={call.phone} size="lg" />
+            <Avatar name={customerName} phone={call.phone} size="lg" />
             <div className="min-w-0">
               <div className="text-xs uppercase tracking-wide text-slate-500">
                 Call from
               </div>
               <div className="text-lg font-semibold text-slate-900 truncate">
-                {formatPhone(call.phone)}
+                {customerName || formatPhone(call.phone)}
               </div>
-              <div className="mt-0.5 text-xs text-slate-500">
+              <div className="mt-0.5 text-xs text-slate-500 truncate">
+                {customerName ? `${formatPhone(call.phone)} · ` : ""}
                 {formatDate(call.created_at)}
               </div>
             </div>
@@ -39,12 +45,18 @@ export function CallDetailsModal({ call, onClose }: CallDetailsModalProps) {
         ) : null
       }
     >
-      {call ? <CallBody call={call} /> : null}
+      {call ? <CallBody call={call} customerName={customerName} /> : null}
     </ModalShell>
   );
 }
 
-function CallBody({ call }: { call: Call }) {
+function CallBody({
+  call,
+  customerName,
+}: {
+  call: Call;
+  customerName?: string | null;
+}) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
@@ -81,7 +93,10 @@ function CallBody({ call }: { call: Call }) {
       </Section>
 
       <Section label="Transcript">
-        <TranscriptView transcript={call.transcript} />
+        <TranscriptView
+          transcript={call.transcript}
+          customerName={customerName}
+        />
       </Section>
     </div>
   );

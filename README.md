@@ -8,12 +8,31 @@ Final school project — a focused demo, not a SaaS product.
 
 ## Live deployment
 
-| Environment | Branch | Backend URL | Status |
+| Environment | Branch | Backend | Frontend (dashboard) |
 |---|---|---|---|
-| **production** | `main` | https://backend-production-b7e9.up.railway.app | ✅ live |
-| **staging** | `dev` | https://backend-staging-eb69.up.railway.app | ✅ live |
+| **production** | `main` | https://backend-production-b7e9.up.railway.app ✅ | https://frontend-production-dbfb.up.railway.app ✅ |
+| **staging** | `dev` | https://backend-staging-eb69.up.railway.app ✅ | https://frontend-staging-98c8.up.railway.app ✅ |
 
-Both backends respond to `GET /health` with `{"status":"ok"}`. Production env vars are filled in (real Twilio number, Vapi assistant, Supabase project); staging still has placeholders.
+Both backends respond to `GET /health` with `{"status":"ok"}`. Both frontends serve `/`, `/calls`, `/leads` with 200. Production env vars are filled in end-to-end (real Twilio number, Vapi assistant, Supabase project, frontend anon key); staging still has placeholders.
+
+### What works today
+
+The system is end-to-end live. A real call into the Twilio number flows through the entire pipeline and lands in the dashboard within seconds of hanging up:
+
+- ✅ **Twilio missed-call detection** — owner-phone dial with 15s timeout, `DialCallStatus` webhook catches no-answer / busy / failed
+- ✅ **Vapi outbound callback** — backend triggers the assistant to call the customer back from the same Twilio number (30s delay)
+- ✅ **Vapi end-of-call webhook** — backend receives `end-of-call-report`, parses `analysis.summary`, `analysis.structuredData` (name / appointment_requested / preferred_time / call_summary), and the artifact fields
+- ✅ **`calls` table** — one row per recovered conversation, **always** inserted: phone, summary, transcript, recording_url, duration_seconds, ended_reason, appointment_requested, preferred_time, status
+- ✅ **`leads` table** — one row only when the conversation produced an opportunity (caller asked to book or gave a name): phone, name, summary, appointment_requested, preferred_time, status, missed_call_count
+- ✅ **Transcripts saved** — full conversation text from Vapi's artifact, rendered in the dashboard as a chat-style transcript (AI vs. customer bubbles)
+- ✅ **Recordings saved** — Vapi's recording URL is stored on the call row and played inline in the dashboard modal
+- ✅ **Analytics dashboard (`/`)** — KPI cards with sparklines + week-over-week trend, recovered-calls line chart, leads bar chart, appointment-vs-regular donut, call-status donut, recent calls + recent leads sections
+- ✅ **`/calls` page** — full list of every recovered conversation; clicking a row opens a detail modal with summary, duration, preferred time, recording player, conversation-style transcript
+- ✅ **`/leads` page** — filtered list of opportunities; clicking a lead opens a detail modal that joins the corresponding `calls` row by phone, so transcript and recording show up on the lead too
+- ✅ **Avatar initials from caller name** — when a phone is also a named lead, calls/leads pages render real initials (e.g. `Nathan Attia → NA`); anonymous calls show `?`
+- ✅ **RLS configured** — anon key has SELECT-only on `calls` + `leads`; service_role stays backend-only for inserts
+
+The frontend uses the **Supabase anon key only**. The service_role key never leaves the backend.
 
 ---
 
@@ -26,7 +45,7 @@ Both backends respond to `GET /health` with `{"status":"ok"}`. Production env va
 5. A **Vapi voice agent** (STT → LLM → TTS) talks to the customer: answers basic business questions and offers to book an appointment.
 6. When the call ends, **Vapi posts an end-of-call report** to the backend.
 7. The backend **always inserts a row into `calls`** (every recovered conversation), and **additionally inserts a row into `leads`** only when the conversation produced an opportunity (caller asked for an appointment or gave a name).
-8. (Future) A dashboard reads `calls` so the owner sees every recovered call, with `leads` highlighted as the subset worth following up.
+8. The **dashboard** reads `calls` and `leads` from Supabase using the anon key and renders the recovered conversation: summary, transcript (as an AI ↔ customer chat), recording player, KPI analytics, and a side-by-side leads view.
 
 ---
 
@@ -43,7 +62,27 @@ flowchart LR
     E -->|6. end-of-call webhook| D
     D -->|7a. insert every conversation| F[(Supabase calls)]
     D -->|7b. insert if opportunity| G[(Supabase leads)]
+    F -->|read via anon key| H[Next.js dashboard]
+    G -->|read via anon key| H
 ```
+
+### Production data flow — end to end
+
+This is what happens when a real call comes in today:
+
+| Step | System | Action | Persisted? |
+|---|---|---|---|
+| 1 | **Twilio** | Customer dials the business number. Twilio POSTs `/twilio/voice`. | — |
+| 2 | **Twilio** | Backend returns TwiML `<Dial timeout="15">` pointing at the owner's phone. | — |
+| 3 | **Twilio** | Owner doesn't pick up. Twilio POSTs `/twilio/dial-status` with `DialCallStatus=no-answer`. | — |
+| 4 | **Backend** | Counts recent misses for this phone, inserts a `status='missed'` row into `leads` (drives the repeat-caller heuristic), schedules a 30s-delayed Vapi callback as a fire-and-forget task. | ✅ `leads` (status=missed) |
+| 5 | **Backend → Vapi** | After 30s, POSTs `/call` to Vapi with the customer's number, the assistant ID, and the Twilio phone-number ID as caller. | — |
+| 6 | **Vapi** | Places the outbound call from the same Twilio number. Customer picks up; Vapi agent (STT → LLM → TTS) holds the conversation. | — |
+| 7 | **Vapi → Backend** | On hangup, Vapi POSTs `end-of-call-report` to `/vapi/end-of-call` with `x-vapi-secret` header, `analysis.summary`, `analysis.structuredData` (name, appointment_requested, preferred_time, call_summary), `artifact.transcript`, `artifact.recordingUrl`, `durationSeconds`, `endedReason`. | — |
+| 8 | **Backend → Supabase** | Always inserts one row into `calls` with every field. Additionally inserts a row into `leads` if `appointment_requested=true` **or** a caller `name` was extracted. Both inserts use the service_role key over PostgREST. | ✅ `calls`, optionally `leads` |
+| 9 | **Dashboard** | Next.js page reads `calls` + `leads` from Supabase using the anon key (RLS allows SELECT only). The `/` page aggregates KPIs and charts; `/calls` lists every conversation with a detail modal (summary, duration, recording, transcript); `/leads` joins the matching `calls` row by phone so the same modal renders for opportunities. | — |
+
+End-to-end latency from customer hangup to dashboard row visible: typically under 2 seconds (Vapi posts the report immediately, backend inserts within ~100ms, Supabase replicates within ~1s, the dashboard renders on the next request — pages use `force-dynamic` so a refresh shows the row).
 
 ---
 
@@ -362,28 +401,42 @@ After a call, a row should always appear in `calls`. A row in `leads` only appea
 - [x] Vapi end-of-call → Supabase insert (with defensive parsing + fallback summary)
 - [x] Split storage: `calls` (every conversation) + `leads` (opportunities only)
 - [x] Supabase migration applied to remote project
+- [x] Supabase RLS configured — anon SELECT on `calls` + `leads`, writes locked to service_role
 - [x] Railway project + environments (production, staging)
 - [x] Backend deployed to both environments with public URLs
-- [x] `main` → production, `dev` → staging auto-deploy wired up
-- [x] Real env vars filled in (production)
+- [x] Frontend deployed to both environments with public URLs
+- [x] `main` → production, `dev` → staging auto-deploy wired up for both services
+- [x] Real env vars filled in (production) — Twilio, Vapi, Supabase service_role (backend) + anon (frontend)
 - [x] Twilio webhook + Vapi server URL pointed at production backend
 - [x] End-to-end live call test (Server URL, Server Messages, analysisPlan all verified via API)
-- [x] Dashboard (Next.js) reading `calls` and `leads` from Supabase
-- [ ] Frontend deployed (Railway settings in `frontend/railway.json` — confirm root dir + env vars in the Railway UI for each environment)
+- [x] Real Vapi call data flowing into Supabase — `calls` and `leads` populated with summary, transcript, recording_url, duration, ended_reason, preferred_time, appointment_requested, name
+- [x] Dashboard rendering live data — analytics, /calls, /leads, detail modal, conversation-style transcript, recording player, joined lead↔call by phone
 
 ---
 
 ## Frontend dashboard
 
-The dashboard lives in `frontend/` and is a Next.js 14 App Router app. It reads `calls` and `leads` directly from Supabase using the **anon** key (no auth, demo only).
+The dashboard lives in `frontend/` and is a Next.js 14 App Router app. It reads `calls` and `leads` directly from Supabase using the **anon** key (no auth, demo only). Server components fetch on every request (`force-dynamic`) — refresh after a call and the new row is there.
 
 ### Pages
 
 | Path | Shows |
 |---|---|
-| `/` | Overview — 4 stat cards (recovered calls, leads, appointments requested, avg duration) + most recent 10 calls |
-| `/calls` | Every callback conversation. Click a row → modal with summary, transcript, recording player, duration, ended reason, preferred time |
-| `/leads` | Subset of calls flagged as opportunities (caller named or asked to book) |
+| `/` | Overview — 4 KPI cards with sparkline + week-over-week trend (recovered calls, leads found, appointments requested, avg duration), recovered-calls line chart (14d), leads bar chart (14d), appointment-vs-regular donut, call-status donut, recent calls (5), recent leads (5), quick-actions row |
+| `/calls` | Full table of every callback conversation: caller, summary, duration, status, when. Avatar shows real initials when the phone is also a known lead, otherwise `?`. Clicking a row opens the **call detail modal** (see below). |
+| `/leads` | Filtered table of opportunities (caller named or asked to book). Clicking a row opens the **lead detail modal**, which joins the latest matching `calls` row by phone so transcript + recording show up on the lead too. |
+
+### Detail modal
+
+Same component shell on both `/calls` and `/leads`. Features:
+
+- Animated open/close (180ms enter, 150ms exit, scale + fade)
+- ~220ms skeleton placeholder before content fades in
+- Header with avatar (initials or `?`), caller name or phone, created_at
+- Status badges (appointment / completed / missed / lead status)
+- Summary, duration, preferred time
+- Inline recording player (HTML5 `<audio controls>`) — falls back to "Not available yet" if `recording_url` is null
+- **Conversation-style transcript** — Vapi's raw transcript is parsed into AI ↔ customer turns and rendered as alternating chat bubbles (AI = white card with indigo chip; customer = filled indigo bubble labeled with the caller's first name, or "Customer" if anonymous). If the transcript doesn't follow a speaker-prefix pattern it falls back to a plain preformatted block.
 
 If `transcript` or `recording_url` is null the UI shows "Not available yet" instead of breaking. If Supabase env vars are missing, the page shows a friendly banner rather than crashing.
 
