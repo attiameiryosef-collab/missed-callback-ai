@@ -2,10 +2,12 @@ import { parseTranscript } from "@/lib/transcript";
 
 interface TranscriptViewProps {
   transcript: string | null | undefined;
+  customerName?: string | null;
 }
 
-export function TranscriptView({ transcript }: TranscriptViewProps) {
+export function TranscriptView({ transcript, customerName }: TranscriptViewProps) {
   const turns = parseTranscript(transcript);
+  const customerLabel = chipLabelFor(customerName);
 
   if (turns.length === 0) {
     return (
@@ -33,7 +35,7 @@ export function TranscriptView({ transcript }: TranscriptViewProps) {
               (t.speaker === "user" ? "flex-row-reverse" : "")
             }
           >
-            <RoleChip speaker={t.speaker} />
+            <RoleChip speaker={t.speaker} customerLabel={customerLabel} />
             <div
               className={
                 "max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed " +
@@ -49,8 +51,15 @@ export function TranscriptView({ transcript }: TranscriptViewProps) {
   );
 }
 
-function RoleChip({ speaker }: { speaker: "ai" | "user" | "unknown" }) {
-  const label = speaker === "ai" ? "AI" : speaker === "user" ? "You" : "··";
+function RoleChip({
+  speaker,
+  customerLabel,
+}: {
+  speaker: "ai" | "user" | "unknown";
+  customerLabel: string;
+}) {
+  const label =
+    speaker === "ai" ? "AI" : speaker === "user" ? customerLabel : "··";
   const cls =
     speaker === "ai"
       ? "bg-indigo-100 text-indigo-700"
@@ -60,13 +69,20 @@ function RoleChip({ speaker }: { speaker: "ai" | "user" | "unknown" }) {
   return (
     <span
       className={
-        "shrink-0 h-7 min-w-[28px] px-1.5 rounded-full grid place-items-center text-[10px] font-semibold " +
+        "shrink-0 h-7 px-2 rounded-full grid place-items-center text-[10px] font-semibold whitespace-nowrap " +
         cls
       }
     >
       {label}
     </span>
   );
+}
+
+function chipLabelFor(name: string | null | undefined): string {
+  const clean = (name ?? "").trim();
+  if (!clean) return "Customer";
+  const first = clean.split(/\s+/)[0];
+  return first.length > 14 ? "Customer" : first;
 }
 
 function bubbleClass(speaker: "ai" | "user" | "unknown") {

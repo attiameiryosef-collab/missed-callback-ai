@@ -88,7 +88,10 @@ function LeadBody({ lead, call }: { lead: Lead; call: Call | null }) {
       </Section>
 
       <Section label="Transcript">
-        <TranscriptView transcript={call?.transcript ?? null} />
+        <TranscriptView
+          transcript={call?.transcript ?? null}
+          customerName={lead.name}
+        />
       </Section>
     </div>
   );

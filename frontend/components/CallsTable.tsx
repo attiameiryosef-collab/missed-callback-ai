@@ -100,7 +100,11 @@ export function CallsTable({ calls, namesByPhone = {} }: CallsTableProps) {
           ))}
         </ul>
       </div>
-      <CallDetailsModal call={selected} onClose={() => setSelected(null)} />
+      <CallDetailsModal
+        call={selected}
+        customerName={selected ? namesByPhone[selected.phone] : null}
+        onClose={() => setSelected(null)}
+      />
     </>
   );
 }
