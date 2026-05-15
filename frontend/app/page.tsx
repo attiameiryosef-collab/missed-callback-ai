@@ -54,7 +54,7 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <header className="px-6 md:px-10 pt-10 pb-8 border-b border-stone-200 bg-gradient-to-b from-white to-stone-50">
+      <header className="px-6 md:px-10 pt-10 pb-8 border-b border-stone-200 bg-gradient-to-b from-white via-white to-stone-100/70">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200">

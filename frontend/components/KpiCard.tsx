@@ -53,15 +53,19 @@ export function KpiCard({
   const trend = computeTrend(current, previous);
 
   return (
-    <div className="relative bg-white rounded-xl border border-slate-200 shadow-card p-5 overflow-hidden">
+    <div className="relative bg-white rounded-xl border border-slate-200/80 shadow-card hover:shadow-card-hover transition-shadow duration-200 ease-out p-5 overflow-hidden">
       <div className="flex items-start justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-500">{label}</div>
-          <div className="mt-2 text-3xl font-semibold text-slate-900 tracking-tight">
+          <div className="text-[13px] font-medium text-slate-500 tracking-tight">
+            {label}
+          </div>
+          <div className="mt-2 text-3xl font-semibold text-slate-900 tracking-tight tabular-nums">
             {value}
           </div>
           {hint ? (
-            <div className="mt-1 text-xs text-slate-500">{hint}</div>
+            <div className="mt-1 text-xs text-slate-500 leading-relaxed">
+              {hint}
+            </div>
           ) : null}
         </div>
         {icon ? (

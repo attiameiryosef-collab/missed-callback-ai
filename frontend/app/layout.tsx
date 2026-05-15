@@ -15,7 +15,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-stone-50 text-slate-900 antialiased selection:bg-indigo-100 selection:text-indigo-900">
+      <body className="min-h-screen bg-[#f4f4f3] text-slate-900 antialiased selection:bg-indigo-100 selection:text-indigo-900">
         <div className="flex min-h-screen">
           <Sidebar />
           <div className="flex-1 min-w-0 flex flex-col">{children}</div>

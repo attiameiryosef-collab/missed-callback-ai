@@ -14,7 +14,7 @@ export function Sidebar() {
   const envLabel = process.env.NEXT_PUBLIC_APP_ENV ?? "demo";
 
   return (
-    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-stone-200 bg-stone-100/70 backdrop-blur-sm">
+    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-stone-200 bg-white shadow-rail z-10">
       <div className="px-5 py-6 border-b border-stone-200">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 grid place-items-center text-white text-sm font-bold">
@@ -39,10 +39,10 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ease-out " +
+                "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ease-out " +
                 (active
-                  ? "bg-white text-indigo-700 shadow-card ring-1 ring-stone-200"
-                  : "text-slate-600 hover:bg-white/70 hover:text-slate-900")
+                  ? "bg-indigo-50/70 text-indigo-700 ring-1 ring-inset ring-indigo-100"
+                  : "text-slate-600 hover:bg-stone-100 hover:text-slate-900")
               }
             >
               <NavIcon name={item.icon} active={active} />

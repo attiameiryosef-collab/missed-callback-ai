@@ -18,15 +18,17 @@ export function SectionCard({
   return (
     <section
       className={
-        "bg-white rounded-xl border border-slate-200 shadow-card p-5 " +
+        "bg-white rounded-xl border border-slate-200/80 shadow-card hover:shadow-card-hover transition-shadow duration-200 ease-out p-5 " +
         (className ?? "")
       }
     >
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+          <h3 className="text-sm font-semibold text-slate-900 tracking-tight">
+            {title}
+          </h3>
           {subtitle ? (
-            <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+            <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
           ) : null}
         </div>
         {action}
